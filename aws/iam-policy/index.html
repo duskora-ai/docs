@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IAM policy for the AWS integration · Duskora.ai Docs</title>
+    <meta name="description" content="The minimum IAM policy to attach to the IAM user whose access key you connect to Duskora, what each action is for, and how Duskora checks it." />
+    <link rel="canonical" href="https://docs.duskora.ai/aws/iam-policy/" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta property="og:title" content="IAM policy for the AWS integration · Duskora.ai Docs" />
+    <meta property="og:description" content="The minimum IAM policy to attach to the IAM user whose access key you connect to Duskora, what each action is for, and how Duskora checks it." />
+    <meta property="og:url" content="https://docs.duskora.ai/aws/iam-policy/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Duskora.ai Docs" />
+    <meta property="og:image" content="https://duskora.ai/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://duskora.ai/og-image.png" />
+    <link rel="preload" href="/fonts/inter-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="wrap nav">
+        <a class="brand" href="/" aria-label="Duskora.ai docs home">
+          <img src="/logo.svg" width="44" height="30" alt="" />
+          <span class="wordmark">Duskora<span>.ai</span><span class="docs-tag">Docs</span></span>
+        </a>
+        <nav class="nav-links" aria-label="Main">
+          <a class="hide-sm" href="https://duskora.ai/">Website</a>
+          <a class="btn btn-ghost" href="https://factory.duskora.ai">Sign in</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="doc">
+      <p class="crumbs"><a href="/">Docs</a> / Connections</p>
+      <h1>IAM policy for the AWS integration</h1>
+      <p class="updated">Last updated: 17 November 2026</p>
+
+      <p>Duskora connects to an AWS account with an IAM user's access key pair. An org admin adds it in <strong>Organization settings → Connections → AWS</strong>. Attach the policy below to that IAM user before connecting it. Settings checks the key against this policy and names any action that's missing.</p>
+
+      <h2 id="policy">The policy</h2>
+      <div class="copy-row">
+        <button class="btn btn-ghost" type="button" data-copy="policy-json">Copy policy</button>
+        <a class="btn btn-ghost" href="/aws/iam-policy.json" download>Download JSON</a>
+      </div>
+      <pre><code id="policy-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DuskoraReadOnlyChecks",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListClusters",
+        "logs:DescribeLogGroups",
+        "s3:ListAllMyBuckets",
+        "sts:GetSessionToken"
+      ],
+      "Resource": "*"
+    }
+  ]
+}</code></pre>
+
+      <p>Every action here is read-only. Deploy runs never get the stored key: Duskora exchanges it for short-lived session credentials with <code>sts:GetSessionToken</code> and hands only those to the run.</p>
+      <p>When a workflow's Deploy stage turns on <strong>Apply infrastructure</strong>, the run applies the repository's Terraform with those session credentials. That needs whatever actions your Terraform manages (for example <code>ec2:*</code> or <code>s3:CreateBucket</code>), which Duskora can't know in advance, so they aren't in this policy or the check. Add them for the resources your Terraform manages, scoped as tightly as you can. Session credentials can't call IAM APIs unless MFA was used, so Terraform that manages IAM resources fails with session credentials.</p>
+
+      <h2 id="actions">What each action is for</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>IAM action</th><th>Checked with</th><th>What it lets Duskora see</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>s3:ListAllMyBuckets</code></td><td>S3 <code>ListBuckets</code> (one bucket)</td><td>The account's S3 buckets</td></tr>
+            <tr><td><code>ecs:ListClusters</code></td><td>ECS <code>ListClusters</code> in <code>us-east-1</code> (one cluster)</td><td>The account's ECS clusters</td></tr>
+            <tr><td><code>logs:DescribeLogGroups</code></td><td>CloudWatch Logs <code>DescribeLogGroups</code> in <code>us-east-1</code> (one group)</td><td>The account's CloudWatch log groups</td></tr>
+            <tr><td><code>sts:GetSessionToken</code></td><td>STS <code>GetSessionToken</code> (a 15-minute session, left unused)</td><td>Short-lived credentials for deploy runs</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>STS <code>GetCallerIdentity</code>, which checks the key when it's connected, needs no permission.</p>
+
+      <h2 id="attach">Attaching the policy</h2>
+      <h3>In the AWS console</h3>
+      <ol>
+        <li>Open <strong>IAM → Users</strong> and pick the user whose access key you connect.</li>
+        <li><strong>Permissions → Add permissions → Create inline policy</strong>, switch to <strong>JSON</strong> and paste the policy.</li>
+        <li>Name it (for example <code>duskora</code>) and create it.</li>
+      </ol>
+      <h3>With the AWS CLI</h3>
+      <pre><code>curl -fsSLo duskora-iam-policy.json https://docs.duskora.ai/aws/iam-policy.json
+aws iam put-user-policy \
+  --user-name &lt;user&gt; \
+  --policy-name duskora \
+  --policy-document file://duskora-iam-policy.json</code></pre>
+      <p>IAM changes can take a few seconds to apply. Reload Settings to run the check again.</p>
+
+      <h2 id="check">What the check reports</h2>
+      <p>Settings runs the check for each connected AWS account, calling each action above with the stored key, and sorts the actions:</p>
+      <ul>
+        <li><strong>Missing:</strong> AWS refused the call (<code>AccessDenied</code>, <code>AccessDeniedException</code>, <code>UnauthorizedOperation</code> or another HTTP 403). Settings names each missing action and links here.</li>
+        <li><strong>Unknown:</strong> the call failed for another reason, such as a network error, throttling or a key deactivated in IAM. Settings shows a note; try again later.</li>
+      </ul>
+      <p>A missing permission doesn't disconnect the account. The check only reads, and its result isn't stored.</p>
+      <p>Permissions can also be limited outside the user's own policies, by a permissions boundary, a service control policy (AWS Organizations) or a condition on region. If the policy is attached and Settings still reports an action as missing, check those.</p>
+    </main>
+    <script>
+      document.querySelectorAll('[data-copy]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const text = document.getElementById(btn.dataset.copy).textContent;
+          try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = 'Copied';
+          } catch {
+            btn.textContent = 'Copy failed';
+          }
+          setTimeout(() => (btn.textContent = 'Copy policy'), 2000);
+        });
+      });
+    </script>
+
+    <footer>
+      <div class="wrap foot">
+        <span>© <span id="year">2026</span> Duskora.ai</span>
+        <nav class="foot-links" aria-label="Links">
+          <a href="https://duskora.ai/">duskora.ai</a>
+          <a href="https://duskora.ai/terms/">Terms</a>
+          <a href="https://duskora.ai/privacy/">Privacy</a>
+          <a href="mailto:hello@duskora.ai">hello@duskora.ai</a>
+        </nav>
+      </div>
+    </footer>
+    <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+  </body>
+</html>
